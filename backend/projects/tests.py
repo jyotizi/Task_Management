@@ -1,7 +1,8 @@
 import pytest
+from datetime import timedelta
 from rest_framework.test import APIClient
 from users.models import User
-from projects.models import Project, Membership, Task
+from projects.models import Project, Membership, Task, Comment
 
 
 @pytest.fixture
@@ -140,4 +141,69 @@ class TestTasks:
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
 
         response = client.delete(f'/api/tasks/{task.id}')
+        assert response.status_code == 403
+
+    def test_project_member_can_list_comments_oldest_first(self, client, user):
+        owner = User.objects.create_user(email='owner@example.com', name='Owner', password='password123')
+        project = Project.objects.create(name='P', owner=owner)
+        Membership.objects.create(user=owner, project=project, role='admin')
+        Membership.objects.create(user=user, project=project, role='viewer')
+        task = Task.objects.create(project=project, title='A task', created_by=owner)
+        first = Comment.objects.create(task=task, author=owner, body='First comment')
+        Comment.objects.create(task=task, author=user, body='Second comment')
+        Comment.objects.filter(id=first.id).update(created_at=first.created_at - timedelta(days=1))
+
+        resp = client.post('/api/auth/login', {'email': 'meera@taskboard.dev', 'password': 'password123'}, format='json')
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
+
+        response = client.get(f'/api/tasks/{task.id}/comments')
+        assert response.status_code == 200
+        assert [comment['body'] for comment in response.data['comments']] == ['First comment', 'Second comment']
+        assert response.data['comments'][0]['author'] == {
+            'id': str(owner.id), 'name': 'Owner', 'email': 'owner@example.com',
+        }
+        assert 'createdAt' in response.data['comments'][0]
+
+    def test_non_member_cannot_list_or_post_comments(self, client, user):
+        owner = User.objects.create_user(email='owner@example.com', name='Owner', password='password123')
+        project = Project.objects.create(name='P', owner=owner)
+        Membership.objects.create(user=owner, project=project, role='admin')
+        task = Task.objects.create(project=project, title='A task', created_by=owner)
+
+        resp = client.post('/api/auth/login', {'email': 'meera@taskboard.dev', 'password': 'password123'}, format='json')
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
+
+        get_response = client.get(f'/api/tasks/{task.id}/comments')
+        post_response = client.post(f'/api/tasks/{task.id}/comments', {'body': 'Not allowed'}, format='json')
+        assert get_response.status_code == 403
+        assert post_response.status_code == 403
+
+    def test_member_can_post_comment_and_empty_body_is_rejected(self, client, user):
+        owner = User.objects.create_user(email='owner@example.com', name='Owner', password='password123')
+        project = Project.objects.create(name='P', owner=owner)
+        Membership.objects.create(user=owner, project=project, role='admin')
+        Membership.objects.create(user=user, project=project, role='member')
+        task = Task.objects.create(project=project, title='A task', created_by=owner)
+
+        resp = client.post('/api/auth/login', {'email': 'meera@taskboard.dev', 'password': 'password123'}, format='json')
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
+
+        response = client.post(f'/api/tasks/{task.id}/comments', {'body': '  Looks good  '}, format='json')
+        empty_response = client.post(f'/api/tasks/{task.id}/comments', {'body': '   '}, format='json')
+        assert response.status_code == 201
+        assert response.data['comment']['body'] == 'Looks good'
+        assert response.data['comment']['author']['id'] == str(user.id)
+        assert empty_response.status_code == 400
+
+    def test_viewer_cannot_post_comments(self, client, user):
+        owner = User.objects.create_user(email='owner@example.com', name='Owner', password='password123')
+        project = Project.objects.create(name='P', owner=owner)
+        Membership.objects.create(user=owner, project=project, role='admin')
+        Membership.objects.create(user=user, project=project, role='viewer')
+        task = Task.objects.create(project=project, title='A task', created_by=owner)
+
+        resp = client.post('/api/auth/login', {'email': 'meera@taskboard.dev', 'password': 'password123'}, format='json')
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
+
+        response = client.post(f'/api/tasks/{task.id}/comments', {'body': 'Not allowed'}, format='json')
         assert response.status_code == 403
