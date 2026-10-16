@@ -17,6 +17,7 @@ docker-compose up --build
 docker-compose exec backend python manage.py migrate
 docker-compose exec backend python manage.py seed
 
+
 # Run the test suites
 docker-compose exec backend python -m pytest          # Django tests
 docker-compose exec frontend npm test                 # React tests
@@ -133,7 +134,7 @@ The backend uses `pyairtable` for real API calls. `backend/projects/airtable_moc
 | Routing | React Router 6 |
 | Data fetching | TanStack Query 5 |
 | Styling | Tailwind CSS 3 |
-| Frontend tests | Vitest 2 + Testing Library |
+| Frontend tests | Vitest 2 +:"viewers cannot update tasks" Testing Library |
 | Backend | Django 5, Django REST Framework 3 |
 | Auth | djangorestframework-simplejwt (JWT, 30-day tokens) |
 | ORM | Django ORM |
